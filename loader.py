@@ -1,32 +1,55 @@
 from mnist import MNIST
 from random import *
+import pdb;
 
 mndata = MNIST('data')
 
 images, labels = mndata.load_training()
+test_images, test_labels = mndata.load_testing()
 
-index = 2  # choose an index
+index = 4  # choose an index
 
 # print(mndata.display(images[index]))
 #print(mndata.train_images[index])
 # print(mndata.train_labels[index])
-# print(len(mndata.train_images))
+print(len(mndata.train_images))
+print(len(mndata.test_images))
 # print(dir(mndata))
 
+annealing = 20.0
 
+def cap(this_num):
+    if this_num > 1.0:
+        return 1.0
+    if this_num < -1.0:
+        return -1.0
+    return this_num
 
 class Brain:
     def __init__(self):
         self.input_layer = Layer(256)
-        self.hidden_layer = Layer(16)
+        self.hidden_layer1 = Layer(32)
+        self.hidden_layer2 = Layer(32)
+        self.hidden_layer3 = Layer(32)
         self.output_layer = Layer(10)
-        self.input_layer.attach(self.hidden_layer)
-        self.hidden_layer.attach(self.output_layer)
+        self.input_layer.attach(self.hidden_layer1)
+        self.hidden_layer1.attach(self.hidden_layer2)
+        self.hidden_layer2.attach(self.hidden_layer3)
+        self.hidden_layer3.attach(self.output_layer)
     def process(self, image):
         self.input_layer.process(image)
-        self.hidden_layer.process("none")
+        self.hidden_layer1.process("none")
+        self.hidden_layer2.process("none")
+        self.hidden_layer3.process("none")
         self.output_layer.process("none")
-        self.output_layer.render()
+    def learn(self, label):
+        target_list = [-1.0] * 10
+        target_list[label] = 1.0
+        self.output_layer.calc_error(target_list)
+        self.hidden_layer3.calc_error("none")
+        self.hidden_layer2.calc_error("none")
+        self.hidden_layer1.calc_error("none")
+    annealing += 1.0/1000.0
 
 class Layer:
     def __init__(self, count):
@@ -46,8 +69,17 @@ class Layer:
             else:
                 neuron.receive_input(image[idx])
     def render(self):
+        ary = []
         for idx, neuron in enumerate(self.neurons):
-            print(neuron.activity)
+            ary.append(neuron.activity)
+        return ary
+    def calc_error(self, targets):
+        for idx, neuron in enumerate(self.neurons):
+            if targets == "none":
+                target = neuron.target
+            else:
+                neuron.target = targets[idx]
+            neuron.calc_error()
 
 class Neuron:
     def __init__(self):
@@ -59,47 +91,79 @@ class Neuron:
         if brightness == "none": ##Sum activity
             constant_factor = 16.0 / len(self.inputs)
             add_up = 0.0
-            for idx, input_synapse in self.inputs:
-                add_up += input_synapse.get_act()*constant_factor
-            if add_up > 1.0:
-                add_up = 1.0
-            if add_up < 0: ##Bias toward sparse coding format
-                add_up = 0
+            for idx, input_synapse in enumerate(self.inputs):
+                add_up = add_up + input_synapse.get_act() * constant_factor
+            add_up = cap(add_up)
             self.activity = add_up
         else:
             self.activity = (brightness/128.0) - 1.0
+        self.target = self.activity ##reset target weight when feeding forward
     def synapse_onto(self, neuron):
         syn = Synapse(self, neuron)
         self.outputs.append(syn)
         neuron.inputs.append(syn)
-    def calc_error(self, target):
+    def calc_error(self):
+        #pdb.set_trace()
+        self.target = cap(self.target)
         err = self.activity - self.target
-        for idx, input_synapse in self.inputs:
+        delta = annealing
+        for idx, input_synapse in enumerate(self.inputs):
             presynaptic = input_synapse.presynaptic
-            effect = (presynaptic.activity - self.activity) * (input_synapse.weight)
-            input_synapse.change_weight(err * effect * -1)
+            effect = presynaptic.activity
+            presynaptic.target = presynaptic.target - (input_synapse.weight * err / (delta * 4.0))
+            input_synapse.change_weight(err * effect * -1, delta)
 
 class Synapse:
     def __init__(self, neuron1, neuron2):
-        self.weight = random()*2.0 - 1.0
+        self.weight = random() * 2.0 - 1.0
         self.presynaptic = neuron1
         self.postsynaptic = neuron2
         neuron1.outputs.append(self)
         neuron2.inputs.append(self)
     def get_act(self):
         return self.weight * self.presynaptic.activity
-    def change_weight(self, amount):
-        delta = 100.0
-        self.weight -= delta * amount
-        if self.weight > 1.0:
-            self.weight = 1.0
-        if self.weight < -1.0:
-            self.weight = -1.0
-
+    def change_weight(self, amount, delta):
+        self.weight = self.weight + (amount/delta)
+        self.weight = cap(self.weight)
 
 x = Brain()
-x.process(mndata.train_images[index])
+i = 59999
+while i >= 0:
+    if i % 1000 == 0:
+        print(i)
+    x.process(mndata.train_images[i])
+    x.learn(mndata.train_labels[i])
+    i -= 1
 
+print("Training half done")
+
+while i < 60000:
+    if i % 1000 == 0:
+        print(i)
+    x.process(mndata.train_images[i])
+    x.learn(mndata.train_labels[i])
+    i += 1
+
+correct = 0
+incorrect = 0
+i = 9999
+while i >= 0:
+    x.process(mndata.test_images[i])
+    output = x.output_layer.render()
+    estimate = output.index(max(output))
+    truth = mndata.test_labels[i]
+    print (estimate, truth)
+    if estimate == truth:
+        correct += 1.0
+        print(output)
+    else:
+        incorrect += 1.0
+        print(output)
+    x.learn(mndata.test_labels[i])
+    i -= 1
+
+print(incorrect/1000.0)
+print(correct/1000.0)
 
 
 #
