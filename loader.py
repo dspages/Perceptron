@@ -7,8 +7,6 @@ mndata = MNIST('data')
 images, labels = mndata.load_training()
 test_images, test_labels = mndata.load_testing()
 
-index = 4  # choose an index
-
 # print(mndata.display(images[index]))
 #print(mndata.train_images[index])
 # print(mndata.train_labels[index])
@@ -16,7 +14,7 @@ print(len(mndata.train_images))
 print(len(mndata.test_images))
 # print(dir(mndata))
 
-annealing = 20.0
+annealing = 300.0
 
 def cap(this_num):
     if this_num > 1.0:
@@ -28,14 +26,15 @@ def cap(this_num):
 class Brain:
     def __init__(self):
         self.input_layer = Layer(256)
-        self.hidden_layer1 = Layer(32)
-        self.hidden_layer2 = Layer(32)
-        self.hidden_layer3 = Layer(32)
+        self.hidden_layer1 = Layer(144)
+        self.hidden_layer2 = Layer(64)
+        self.hidden_layer3 = Layer(64)
         self.output_layer = Layer(10)
-        self.input_layer.attach(self.hidden_layer1)
-        self.hidden_layer1.attach(self.hidden_layer2)
-        self.hidden_layer2.attach(self.hidden_layer3)
-        self.hidden_layer3.attach(self.output_layer)
+        self.input_layer.attach(self.hidden_layer1, [16,12])
+        self.hidden_layer1.attach(self.hidden_layer2, [12,8])
+        self.hidden_layer2.attach(self.hidden_layer3, "f")
+        #self.hidden_layer1.attach(self.hidden_layer3, "f")
+        self.hidden_layer3.attach(self.output_layer, "f")
     def process(self, image):
         self.input_layer.process(image)
         self.hidden_layer1.process("none")
@@ -49,7 +48,7 @@ class Brain:
         self.hidden_layer3.calc_error("none")
         self.hidden_layer2.calc_error("none")
         self.hidden_layer1.calc_error("none")
-    annealing += 1.0/1000.0
+    annealing += 1.0/150.0
 
 class Layer:
     def __init__(self, count):
@@ -58,10 +57,19 @@ class Layer:
         while i < count:
             self.neurons.append(Neuron())
             i += 1
-    def attach(self, target_layer):
-        for idx, self_neuron in enumerate(self.neurons):
-            for idx, target_neuron in enumerate(target_layer.neurons):
-                self_neuron.synapse_onto(target_neuron)
+    def attach(self, target_layer, convoluted):
+        for idx1, self_neuron in enumerate(self.neurons):
+            for idx2, target_neuron in enumerate(target_layer.neurons):
+                if convoluted != "f":
+                    idx1_y = idx1 / convoluted[0]
+                    idx1_x = idx1 % convoluted[0]
+                    idx2_y = idx2 / convoluted[1]
+                    idx2_x = idx2 % convoluted[1]
+                    if idx1_y >= idx2_y and idx1_y < idx2_y + 5:
+                        if idx1_x >= idx2_x and idx1_x < idx2_x + 5:
+                            self_neuron.synapse_onto(target_neuron)
+                else:
+                    self_neuron.synapse_onto(target_neuron)
     def process(self, image):
         for idx, neuron in enumerate(self.neurons):
             if image == "none":
@@ -103,14 +111,17 @@ class Neuron:
         self.outputs.append(syn)
         neuron.inputs.append(syn)
     def calc_error(self):
-        #pdb.set_trace()
         self.target = cap(self.target)
         err = self.activity - self.target
+        if err < 0.0:
+            err = err * err * -1
+        else:
+            err = err * err
         delta = annealing
         for idx, input_synapse in enumerate(self.inputs):
             presynaptic = input_synapse.presynaptic
             effect = presynaptic.activity
-            presynaptic.target = presynaptic.target - (input_synapse.weight * err / (delta * 4.0))
+            presynaptic.target = presynaptic.target - (input_synapse.weight * err / (delta * 8.0))
             input_synapse.change_weight(err * effect * -1, delta)
 
 class Synapse:
@@ -126,11 +137,29 @@ class Synapse:
         self.weight = self.weight + (amount/delta)
         self.weight = cap(self.weight)
 
+def evaluate(x, num, mndata):
+    j = num-1
+    correct = 0
+    incorrect = 0
+    while j >= 0:
+        x.process(mndata.test_images[j])
+        output = x.output_layer.render()
+        estimate = output.index(max(output))
+        truth = mndata.test_labels[j]
+        if estimate == truth:
+            correct += 1.0
+        else:
+            incorrect += 1.0
+        j -= 1
+    print(incorrect/100.0)
+    print(correct/100.0)
+
 x = Brain()
 i = 59999
 while i >= 0:
     if i % 1000 == 0:
         print(i)
+        evaluate(x, 100, mndata)
     x.process(mndata.train_images[i])
     x.learn(mndata.train_labels[i])
     i -= 1
@@ -140,18 +169,19 @@ print("Training half done")
 while i < 60000:
     if i % 1000 == 0:
         print(i)
+        evaluate(x, 100, mndata)
     x.process(mndata.train_images[i])
     x.learn(mndata.train_labels[i])
     i += 1
 
 correct = 0
 incorrect = 0
-i = 9999
-while i >= 0:
-    x.process(mndata.test_images[i])
+j = 9999
+while j >= 0:
+    x.process(mndata.test_images[j])
     output = x.output_layer.render()
     estimate = output.index(max(output))
-    truth = mndata.test_labels[i]
+    truth = mndata.test_labels[j]
     print (estimate, truth)
     if estimate == truth:
         correct += 1.0
@@ -159,11 +189,11 @@ while i >= 0:
     else:
         incorrect += 1.0
         print(output)
-    x.learn(mndata.test_labels[i])
-    i -= 1
+    x.learn(mndata.test_labels[j])
+    j -= 1
 
-print(incorrect/1000.0)
-print(correct/1000.0)
+print(incorrect/10000.0)
+print(correct/10000.0)
 
 
 #
