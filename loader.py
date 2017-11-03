@@ -14,8 +14,6 @@ print(len(mndata.train_images))
 print(len(mndata.test_images))
 # print(dir(mndata))
 
-annealing = 600.0
-
 def cap(this_num):
     if this_num > 1.0:
         return 1.0
@@ -23,22 +21,27 @@ def cap(this_num):
         return -1.0
     return this_num
 
+def abs(this_num):
+    if this_num < 0.0:
+        return -1 * this_num
+    return this_num
+
 class Brain:
     def __init__(self):
         self.input_layer = Layer(256)
         self.hidden_layer1 = Layer(144)
-        #self.hidden_layer2 = Layer(64)
-        self.hidden_layer3 = Layer(16)
+        self.hidden_layer2 = Layer(64)
+        self.hidden_layer3 = Layer(64)
         self.output_layer = Layer(10)
         self.input_layer.attach(self.hidden_layer1, [16,12])
-        # self.hidden_layer1.attach(self.hidden_layer2, [12,8])
-        # self.hidden_layer2.attach(self.hidden_layer3, "f")
-        self.hidden_layer1.attach(self.hidden_layer3, "f")
+        self.hidden_layer1.attach(self.hidden_layer2, [12,8])
+        self.hidden_layer2.attach(self.hidden_layer3, "f")
+        #self.hidden_layer1.attach(self.hidden_layer3, "f")
         self.hidden_layer3.attach(self.output_layer, "f")
     def process(self, image):
         self.input_layer.process(image)
         self.hidden_layer1.process("none")
-        # self.hidden_layer2.process("none")
+        self.hidden_layer2.process("none")
         self.hidden_layer3.process("none")
         self.output_layer.process("none")
     def learn(self, label):
@@ -46,9 +49,8 @@ class Brain:
         target_list[label] = 1.0
         self.output_layer.calc_error(target_list)
         self.hidden_layer3.calc_error("none")
-        # self.hidden_layer2.calc_error("none")
+        self.hidden_layer2.calc_error("none")
         self.hidden_layer1.calc_error("none")
-    annealing += 1.0/150.0
 
 class Layer:
     def __init__(self, count):
@@ -97,7 +99,7 @@ class Neuron:
         self.target = 0.0
     def receive_input(self, brightness):
         if brightness == "none": ##Sum activity
-            constant_factor = 16.0 / len(self.inputs)
+            constant_factor = 0.25
             add_up = 0.0
             for idx, input_synapse in enumerate(self.inputs):
                 add_up = add_up + input_synapse.get_act() * constant_factor
@@ -113,19 +115,16 @@ class Neuron:
     def calc_error(self):
         self.target = cap(self.target)
         err = self.activity - self.target
-        if err < 0.0:
-            err = err * err * -1
-        else:
-            err = err * err
-        delta = annealing
+        # if err < 0.0:
+        #     err = err * err * -1
+        # else:
+        #     err = err * err
         for idx, input_synapse in enumerate(self.inputs):
-            presynaptic = input_synapse.presynaptic
-            effect = presynaptic.activity
-            presynaptic.target = presynaptic.target - (input_synapse.weight * err / (0.5 * delta * len(presynaptic.outputs)))
-            input_synapse.change_weight(err * effect * -1, delta)
+            input_synapse.change_weight(err)
 
 class Synapse:
     def __init__(self, neuron1, neuron2):
+        self.mutability = 0.01
         self.weight = random() * 2.0 - 1.0
         self.presynaptic = neuron1
         self.postsynaptic = neuron2
@@ -133,9 +132,12 @@ class Synapse:
         neuron2.inputs.append(self)
     def get_act(self):
         return self.weight * self.presynaptic.activity
-    def change_weight(self, amount, delta):
-        self.weight = self.weight + (amount/delta)
+    def change_weight(self, err):
+        effect = self.presynaptic.activity
+        self.presynaptic.target = self.presynaptic.target - (self.weight * err / (0.25 * len(self.presynaptic.outputs)))
+        self.weight = self.weight + (self.mutability * err * effect * -1)
         self.weight = cap(self.weight)
+        self.mutability = self.mutability - (self.mutability * (0.5-(self.presynaptic.activity * self.weight * err)) / 10000)
 
 def evaluate(x, num, mndata):
     j = num-1
